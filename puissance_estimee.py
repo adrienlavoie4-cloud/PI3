@@ -20,7 +20,8 @@ r = rayon extérieur du pneu
 Ec = efficacité de la chaîne (~0,976 mesurée dans l'étude)
 
 Version pratique adaptée à ton setup
-Tu n'as ni soufflerie ni anémomètre pour mesurer le vent tangentiel/normal séparément, ni la traînée par angle de lacet. Voici une version simplifiée mais toujours rigoureuse, exploitant ce que tu as réellement (BNO085 + Hall) :
+Tu n'as ni soufflerie ni anémomètre pour mesurer le vent tangentiel/normal séparément, ni la traînée par angle de lacet
+Voici une version simplifiée mais toujours rigoureuse, exploitant ce que tu as réellement (BNO085 + Hall) :
 P = Vg·(½·ρ·CdA·Vg²)                          ← aérodynamique (en supposant Va ≈ Vg, vent calme)
   + Vg·Crr·mt·g·cos(pitch)                     ← roulement (pitch mesuré par BNO085)
   + Vg·(91 + 8.7·Vg)·10⁻³                      ← friction roulements (empirique, optionnel)
