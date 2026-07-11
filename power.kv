@@ -1,0 +1,37 @@
+#:kivy 2.0
+# power.kv
+# ---------
+# Decrit A QUOI ressemble l'appli (widgets, tailles, textes).
+# main.py ne s'occupe que DE LA LOGIQUE (calcul de puissance).
+#
+# 'gauge.current_power' et 'app.target_power' sont lus automatiquement :
+# des que la valeur change en Python, le texte se met a jour tout seul,
+# sans code supplementaire (c'est le "data binding" de Kivy).
+
+<Dashboard>:
+    orientation: 'vertical'
+
+    PowerGauge:
+        id: gauge
+        size_hint: (1, 0.8)
+
+    Label:
+        text: f"{int(gauge.current_power)} W"
+        font_size: '40sp'
+        bold: True
+        size_hint: (1, 0.1)
+
+    Label:
+        text: f"Cible : {app.target_power} W"
+        font_size: '20sp'
+        color: 0.7, 0.7, 0.7, 1
+        size_hint: (1, 0.1)
+    Label:
+        text: f"Distance: {}
+
+    Button:
+        text: "Arreter" if root.is_running else "Demarrer" 
+        font_size: '24sp'
+        size_hint: (1, 0.15)
+        background_color: (0.9, 0.2, 0.2, 1) if root.is_running else (0.2, 0.8, 0.3, 1)
+        on_release: root.toggle_collection()
