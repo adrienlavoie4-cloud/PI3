@@ -10,6 +10,9 @@ Les deux fichiers doivent etre dans le meme dossier.
 import random
 from math import cos, sin, radians
 
+from capteur_vitesse import CapteurVitesse
+
+
 from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.uix.boxlayout import BoxLayout
@@ -21,6 +24,8 @@ TARGET_POWER = 220   # puissance cible a suivre (W)
 MAX_POWER = 400      # echelle max de la jauge (W)
 
 
+capteur_vitesse = CapteurVitesse(pin=4)
+capteur_vitesse.init() 
 class PowerGauge(Widget):
     # NumericProperty permet au fichier .kv de "observer" cette valeur
     # et de se mettre a jour automatiquement quand elle change.
@@ -83,12 +88,16 @@ class PowerGauge(Widget):
 
 
 class Dashboard(BoxLayout):
-    """La structure visuelle (widgets, tailles, textes) est definie
-    dans power.kv. Cette classe ne garde que l'etat start/stop."""
-    
     duree_session = NumericProperty(0)
     distance_parcourue = NumericProperty(0)
     is_running = BooleanProperty(False)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        Clock.schedule_interval(self.update_distance, 0.5)
+
+    def update_distance(self, dt):
+        self.distance_parcourue = capteur_vitesse.get_odometre()
 
     def toggle_collection(self):
         if self.is_running:
@@ -99,12 +108,13 @@ class Dashboard(BoxLayout):
 
 
 class PowerApp(App):
-    # Propriete exposee au fichier .kv via 'app.target_power'
     target_power = NumericProperty(TARGET_POWER)
 
     def build(self):
         return Dashboard()
 
+    def on_stop(self):
+        capteur_vitesse.cleanup()
 
 if __name__ == "__main__":
     PowerApp().run()

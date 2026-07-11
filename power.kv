@@ -27,7 +27,7 @@
         color: 0.7, 0.7, 0.7, 1
         size_hint: (1, 0.1)
     Label:
-        text: f"Distance: {}
+        text: f"Distance: {root.distance_parcourue:.2f} km"
 
     Button:
         text: "Arreter" if root.is_running else "Demarrer" 

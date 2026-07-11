@@ -1,5 +1,6 @@
 from kivy.app import App
-
+from capteur_vitesse import CapteurVitesse
+from capteur_puissance import CapteurPuissance
 from kivy.uix.scatter import Scatter
 from kivy.uix.label import Label
 from kivy.uix.floatlayout import FloatLayout
@@ -9,6 +10,8 @@ from kivy.uix.anchorlayout import AnchorLayout
 
 import random
 
+capteur_vitesse.__init__()
+capteur_vitesse = CapteurVitesse()
 class ScatterTextWidget(BoxLayout):
     def change_label_colour(self, *args):
         colour = [random.random() for i in xrange(3)] + [1]
