@@ -8,6 +8,7 @@ la classe App, en minuscules et sans le suffixe "App" :
 Les deux fichiers doivent etre dans le meme dossier.
 """
 import random
+import time
 from math import cos, sin, radians
 
 from capteur_vitesse import CapteurVitesse
@@ -90,14 +91,28 @@ class PowerGauge(Widget):
 class Dashboard(BoxLayout):
     duree_session = NumericProperty(0)
     distance_parcourue = NumericProperty(0)
+    vitesse = NumericProperty(0)
     is_running = BooleanProperty(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.start_time = time.time()
         Clock.schedule_interval(self.update_distance, 0.5)
+        Clock.schedule_interval(self.update_vitesse, 0.5)
+        Clock.schedule_interval(self.update_duree, 0.5)
 
     def update_distance(self, dt):
         self.distance_parcourue = capteur_vitesse.get_odometre()
+
+    def update_vitesse(self, dt):
+        if self.is_running:
+            self.vitesse = capteur_vitesse.get_vitesse()
+        else:
+            self.vitesse = 0
+    
+    def update_duree(self, dt):
+        if self.is_running:
+            self.duree_session+=dt
 
     def toggle_collection(self):
         if self.is_running:
@@ -105,6 +120,7 @@ class Dashboard(BoxLayout):
         else:
             self.ids.gauge.start_collection()
         self.is_running = not self.is_running
+        
 
 
 class PowerApp(App):
