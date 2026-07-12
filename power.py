@@ -21,7 +21,9 @@ from kivy.uix.widget import Widget
 from kivy.uix.boxlayout import BoxLayout
 from kivy.graphics import Color, Line
 from kivy.clock import Clock
+from kivy.uix.slider import Slider
 from kivy.properties import NumericProperty, BooleanProperty
+from kivy.uix.screenmanager import ScreenManager, Screen
 
 TARGET_POWER = 220   # puissance cible a suivre (W)
 MAX_POWER = 400      # echelle max de la jauge (W)
@@ -83,7 +85,12 @@ class Dashboard(BoxLayout):
     pitch_deg = NumericProperty(0)
     acceleration_lin = NumericProperty(0)
 
+    vitesse_manuelle = NumericProperty(0)
+    pitch_deg_manuelle = NumericProperty(0)
+    acceleration_lin_manuelle = NumericProperty(0)
+
     is_running = BooleanProperty(False)
+    debug_mode = BooleanProperty(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -100,25 +107,38 @@ class Dashboard(BoxLayout):
         self.distance_parcourue = capteur_vitesse.get_odometre()
 
     def update_vitesse(self, dt):
-        if self.is_running:
-            self.vitesse = capteur_vitesse.get_vitesse()
+        if self.debug_mode:
+            self.vitesse=self.vitesse_manuelle
         else:
-            self.vitesse = 0
+            if self.is_running:
+                self.vitesse = capteur_vitesse.get_vitesse()
+            else:
+                self.vitesse = 0
     def update_orientation(self,dt):
-        if self.is_running:
-            (yaw, pitch, roll)=capteur_imu.get_orientation()
-            self.pitch_deg = pitch 
+        if self.debug_mode:
+            self.pitch_deg=self.pitch_deg_manuelle
+        else:
+            if self.is_running:
+                (yaw, pitch, roll)=capteur_imu.get_orientation()
+                self.pitch_deg = pitch 
+            else:
+                self.pitch_deg = 0
     
     def update_acceleration_lin(self,dt):
-        if self.is_running:
-            (x,y,z)=capteur_imu.get_acceleration_lineaire()
-            self.acceleration_lin=x #TODO: confirmer l'axe une fois le capteur monté sur le vélo
+        if self.debug_mode:
+            self.acceleration_lin=self.acceleration_lin_manuelle
+        else:
+            if self.is_running:
+                (x,y,z)=capteur_imu.get_acceleration_lineaire()
+                self.acceleration_lin=x #TODO: confirmer l'axe une fois le capteur monté sur le vélo
+            else:
+                self.acceleration_lin=0
 
     def update_duree(self, dt):
         if self.is_running:
             self.duree_session+=dt
     def update_puissance(self, dt):
-        if self.is_running:
+        if self.is_running or self.debug_mode:
             pitch_rad=puissance_estimee.degres_vers_radians(self.pitch_deg)
             mesures_lues=puissance_estimee.creer_mesures(self.vitesse, pitch_rad, self.acceleration_lin)
             composantes_puissance=puissance_estimee.estimer_puissance(mesures_lues)
@@ -127,6 +147,9 @@ class Dashboard(BoxLayout):
 
     def toggle_collection(self):
             self.is_running = not self.is_running
+    
+    def on_debug_mode(self, instance, value):
+        self.ids.debug_switcher.current = 'debug' if value else 'normal'
         
 
 

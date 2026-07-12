@@ -36,21 +36,77 @@
 
     BoxLayout:
         orientation: 'vertical'
-        Label:
-            text: f"Distance: \n {root.distance_parcourue:.2f} km"
-            font_size: '50sp'
-            size_hint: (0.5, 0.1)
-        Label:
-            text: f"Vitesse: \n {root.vitesse:.2f} km/h"
-            font_size: '50sp'
-            size_hint: (0.5, 0.1)
-        Label:
-            text: f"Durée du trajet: \n {root.duree_session:.2f}"
-            font_size: '40sp'
-            size_hint: (0.5, 0.1)
-        Button
-            text: "Debug" 
+
+
+
+        ScreenManager:
+            id: debug_switcher
+            
+
+            Screen:
+                name: 'normal'
+                BoxLayout:
+                    orientation: 'vertical'
+                    Label:
+                        text: f"Distance: \n {root.distance_parcourue:.2f} km"
+                        font_size: '40sp'
+                                            
+                    Label:
+                        text: f"Vitesse: \n {root.vitesse:.2f} km/h"
+                        font_size: '40sp'
+                    Label:
+                        text: f"Orientation: \n {root.pitch_deg:.2f} degre"
+                        font_size: '40sp'
+                    Label:
+                        text: f"Acceleration: \n {root.acceleration_lin:.2f} m/s2"
+                        font_size: '40sp'
+                    Label:
+                        text: f"Duree du trajet: \n {root.duree_session:.2f}"
+                        font_size: '35sp'
+
+            Screen:
+                name: 'debug'
+                BoxLayout:
+                    orientation: 'vertical'
+                    BoxLayout:
+                        orientation:'vertical'
+                        Label:
+                            text: f"Vitesse: {vitesse_slider.value:.1f} km/h"
+                            
+                            font_size: '20sp'
+                        Slider:
+                            id: vitesse_slider
+                            min: 0
+                            max: 45
+                            value: root.vitesse_manuelle
+                            on_value: root.vitesse_manuelle = self.value
+                    BoxLayout:
+                        orientation: 'vertical'
+                        Label:
+                            text: f"Orientation: {root.pitch_deg:.2f} degre"
+                            font_size: '20sp'
+                        Slider:
+                            id: pitch_slider
+                            min: -30
+                            max: 30
+                            value: root.pitch_deg_manuelle
+                            on_value: root.pitch_deg_manuelle = self.value
+                    BoxLayout:
+                        orientation: 'vertical'
+                        Label:
+                            text: f"Acceleration: {root.acceleration_lin:.2f} m/s2"
+                            font_size: '20sp'
+                        Slider:
+                            id: accel_slider
+                            min: -5
+                            max: 5
+                            value: root.acceleration_lin_manuelle
+                            on_value: root.acceleration_lin_manuelle = self.value
+            
+
+        Button:
+            text: "Debug"
             font_size: '30sp'
             size_hint: (0.7, 0.05)
             background_color: (0.5, 0.5, 0.5, 1)
-            on_release: 
+            on_release: root.debug_mode = not root.debug_mode
