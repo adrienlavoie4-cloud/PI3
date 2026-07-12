@@ -7,12 +7,14 @@ la classe App, en minuscules et sans le suffixe "App" :
     PowerApp  ->  power.kv
 Les deux fichiers doivent etre dans le meme dossier.
 """
-import random
+
 import time
 from math import cos, sin, radians
 
-from capteur_vitesse import CapteurVitesse
 
+from capteur_vitesse import CapteurVitesse
+from capteur_imu import CapteurIMU
+import puissance_estimee
 
 from kivy.app import App
 from kivy.uix.widget import Widget
@@ -27,6 +29,8 @@ MAX_POWER = 400      # echelle max de la jauge (W)
 
 capteur_vitesse = CapteurVitesse(pin=4)
 capteur_vitesse.init() 
+capteur_imu = CapteurIMU()
+capteur_imu.init()
 class PowerGauge(Widget):
     # NumericProperty permet au fichier .kv de "observer" cette valeur
     # et de se mettre a jour automatiquement quand elle change.
@@ -35,23 +39,7 @@ class PowerGauge(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.bind(size=self.redraw, pos=self.redraw, current_power=self.redraw)
-        self._update_event = None  # reference vers l'evenement Clock (pour pouvoir l'arreter)
 
-    def start_collection(self):
-        """Demarre la collecte/affichage si ce n'est pas deja en cours."""
-        if self._update_event is None:
-            self._update_event = Clock.schedule_interval(self.update_power, 0.5)
-
-    def stop_collection(self):
-        """Arrete la collecte. La derniere valeur reste affichee (pause)."""
-        if self._update_event is not None:
-            self._update_event.cancel()
-            self._update_event = None
-
-    def update_power(self, dt):
-        # --- Simule une lecture capteur (a remplacer par ta vraie donnee) ---
-        new_value = self.current_power + random.randint(-15, 15)
-        self.current_power = max(0, min(new_value, MAX_POWER))
 
     def redraw(self, *args):
         self.canvas.clear()
@@ -92,6 +80,9 @@ class Dashboard(BoxLayout):
     duree_session = NumericProperty(0)
     distance_parcourue = NumericProperty(0)
     vitesse = NumericProperty(0)
+    pitch_deg = NumericProperty(0)
+    acceleration_lin = NumericProperty(0)
+
     is_running = BooleanProperty(False)
 
     def __init__(self, **kwargs):
@@ -100,6 +91,10 @@ class Dashboard(BoxLayout):
         Clock.schedule_interval(self.update_distance, 0.5)
         Clock.schedule_interval(self.update_vitesse, 0.5)
         Clock.schedule_interval(self.update_duree, 0.5)
+        Clock.schedule_interval(self.update_orientation, 0.5)
+        Clock.schedule_interval(self.update_acceleration_lin, 0.5)
+        Clock.schedule_interval(self.update_puissance, 0.5)
+        
 
     def update_distance(self, dt):
         self.distance_parcourue = capteur_vitesse.get_odometre()
@@ -109,17 +104,29 @@ class Dashboard(BoxLayout):
             self.vitesse = capteur_vitesse.get_vitesse()
         else:
             self.vitesse = 0
+    def update_orientation(self,dt):
+        if self.is_running:
+            (yaw, pitch, roll)=capteur_imu.get_orientation()
+            self.pitch_deg = pitch 
     
+    def update_acceleration_lin(self,dt):
+        if self.is_running:
+            (x,y,z)=capteur_imu.get_acceleration_lineaire()
+            self.acceleration_lin=x #TODO: confirmer l'axe une fois le capteur monté sur le vélo
+
     def update_duree(self, dt):
         if self.is_running:
             self.duree_session+=dt
+    def update_puissance(self, dt):
+        if self.is_running:
+            pitch_rad=puissance_estimee.degres_vers_radians(self.pitch_deg)
+            mesures_lues=puissance_estimee.creer_mesures(self.vitesse, pitch_rad, self.acceleration_lin)
+            composantes_puissance=puissance_estimee.estimer_puissance(mesures_lues)
+            puissance_totale_est=composantes_puissance.total_roue_w
+            self.ids.gauge.current_power=puissance_totale_est
 
     def toggle_collection(self):
-        if self.is_running:
-            self.ids.gauge.stop_collection()
-        else:
-            self.ids.gauge.start_collection()
-        self.is_running = not self.is_running
+            self.is_running = not self.is_running
         
 
 

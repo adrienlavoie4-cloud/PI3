@@ -12,6 +12,7 @@ Références :
     - Dahn et al. (1991) — terme empirique des roulements de roue.
 """
 
+
 import math
 from dataclasses import dataclass
 
@@ -219,48 +220,5 @@ def acceleration_par_difference_finie(
     return (vitesse_finale_ms - vitesse_initiale_ms) / delta_t_s
 
 
-# ---------------------------------------------------------------------------
-# Affichage
-# ---------------------------------------------------------------------------
-
-def afficher_puissance(composantes: ComposantesPuissance, *, afficher_pedalier: bool = True) -> None:
-    """Affiche le détail des composantes de puissance."""
-    print("=" * 48)
-    print("  Estimation de puissance")
-    print("-" * 48)
-    print(f"  Aérodynamique        : {composantes.aerodynamique_w:7.1f} W")
-    print(f"  Roulement            : {composantes.roulement_w:7.1f} W")
-    print(f"  Frottement roulements: {composantes.frottement_roulements_w:7.1f} W")
-    print(f"  Gravité (pente)      : {composantes.gravite_w:7.1f} W")
-    print(f"  Inertie (accél.)     : {composantes.inertie_w:7.1f} W")
-    print("-" * 48)
-    print(f"  TOTAL au roue        : {composantes.total_roue_w:7.1f} W")
-    if afficher_pedalier:
-        print(f"  Aux pédales (Ec)     : {puissance_pedalier(composantes.total_roue_w):7.1f} W")
-    print()
-
-
-# ---------------------------------------------------------------------------
-# Exemple d'utilisation
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    # Exemple : 25 km/h sur plat, accélération légère
-    mesures_exemple = Mesures(
-        vitesse_sol_ms=kmh_vers_ms(25.0),
-        pitch_rad=degres_vers_radians(0.0),
-        acceleration_ms2=0.2,
-    )
-
-    resultat = estimer_puissance(mesures_exemple)
-    afficher_puissance(resultat)
-
-    # Exemple : montée 5 % à 15 km/h, vitesse constante
-    mesures_montee = Mesures(
-        vitesse_sol_ms=kmh_vers_ms(15.0),
-        pitch_rad=math.atan(0.05),  # pente 5 % = rise/run
-        acceleration_ms2=0.0,
-    )
-
-    resultat_montee = estimer_puissance(mesures_montee)
-    afficher_puissance(resultat_montee)
+def creer_mesures(vitesse_sol_ms: float, pitch_rad: float, acceleration_ms2: float) -> Mesures:
+    return Mesures(vitesse_sol_ms=vitesse_sol_ms, pitch_rad=pitch_rad, acceleration_ms2=acceleration_ms2)
