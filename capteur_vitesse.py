@@ -3,29 +3,6 @@ capteur_vitesse.py
 
 Librairie pour mesurer la vitesse et la distance parcourue a partir
 d'un capteur a impulsions (reed switch / capteur Hall) monte sur une roue.
-
-Usage typique dans un fichier GUI :
-
-    from capteur_vitesse import CapteurVitesse
-
-    capteur = CapteurVitesse(pin=4, diametre_roue=700)
-    capteur.init()
-
-    ...
-    vitesse = capteur.get_vitesse()      # km/h
-    distance = capteur.get_odometre()    # km
-    ...
-
-    # a la fermeture du programme
-    capteur.cleanup()
-
-Pour plusieurs capteurs, il suffit de creer plusieurs instances avec
-des pins differents :
-
-    capteur_avant = CapteurVitesse(pin=4)
-    capteur_arriere = CapteurVitesse(pin=17)
-    capteur_avant.init()
-    capteur_arriere.init()
 """
 
 import time
@@ -114,7 +91,7 @@ class CapteurVitesse:
     # Callback GPIO (appele par RPi.GPIO dans son propre thread)
     # ------------------------------------------------------------------
     def _got_pulse(self, channel):
-        ctime = time.time()
+        ctime = time.monotonic()
 
         with self._lock:
             self._historique_temps[self._taille_max] = ctime
@@ -126,7 +103,7 @@ class CapteurVitesse:
             for i in range(self._taille_max):
                 self._historique_temps[i] = self._historique_temps[i + 1]
 
-            if delta_temps == 0.0:
+            if delta_temps <= 0.0:
                 vitesse_mm_s = 0.0
             else:
                 vitesse_mm_s = self._compte * self.circonference_roue / delta_temps

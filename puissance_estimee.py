@@ -147,7 +147,7 @@ def puissance_inertie(
     Note : ½ · mt · d(V²)/dt = mt · a · V (les deux formulations sont équivalentes).
     """
     masse_equivalente = mt + inertie_roues / (rayon**2)
-    return 0.5 * masse_equivalente * acceleration_ms2 * vg
+    return masse_equivalente * acceleration_ms2 * vg
 
 
 # ---------------------------------------------------------------------------
@@ -183,14 +183,21 @@ def estimer_puissance(
         inertie_w=puissance_inertie(vg, a, mt=mt, inertie_roues=inertie_roues, rayon=rayon),
     )
 
-
 def puissance_pedalier(puissance_roue_w: float, ec: float = EFFICACITE_CHAINE) -> float:
     """
     Puissance à produire aux pédales, en corrigeant les pertes de chaîne.
-
     P_pédalier = P_roue / Ec
     """
-    return puissance_roue_w / ec
+    return max(0.0, puissance_roue_w) / ec
+
+
+def puissance_cycliste_w(composantes: ComposantesPuissance, deadband_w: float = 2.0) -> float:
+    """
+    Puissance percue au pedalier, non negative (coasting = 0 W).
+    Un deadband evite le flicker autour de 0 W du au bruit des capteurs.
+    """
+    total = composantes.total_roue_w
+    return total if total > deadband_w else 0.0
 
 
 # ---------------------------------------------------------------------------

@@ -139,11 +139,15 @@ class Dashboard(BoxLayout):
             self.duree_session+=dt
     def update_puissance(self, dt):
         if self.is_running or self.debug_mode:
-            pitch_rad=puissance_estimee.degres_vers_radians(self.pitch_deg)
-            mesures_lues=puissance_estimee.creer_mesures(self.vitesse, pitch_rad, self.acceleration_lin)
-            composantes_puissance=puissance_estimee.estimer_puissance(mesures_lues)
-            puissance_totale_est=composantes_puissance.total_roue_w
-            self.ids.gauge.current_power=puissance_totale_est
+            pitch_rad = puissance_estimee.degres_vers_radians(self.pitch_deg)
+            vitesse_ms = puissance_estimee.kmh_vers_ms(self.vitesse)
+            mesures_lues = puissance_estimee.creer_mesures(vitesse_ms, pitch_rad, self.acceleration_lin)
+            composantes_puissance = puissance_estimee.estimer_puissance(mesures_lues)
+
+            puissance_roue_clamp = puissance_estimee.puissance_cycliste_w(composantes_puissance)
+            puissance_totale_est = puissance_estimee.puissance_pedalier(puissance_roue_clamp)
+
+            self.ids.gauge.current_power = puissance_totale_est
 
     def toggle_collection(self):
             self.is_running = not self.is_running
