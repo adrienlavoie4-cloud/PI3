@@ -22,8 +22,10 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.graphics import Color, Line
 from kivy.clock import Clock
 from kivy.uix.slider import Slider
-from kivy.properties import NumericProperty, BooleanProperty
+from kivy.properties import NumericProperty, BooleanProperty, StringProperty
 from kivy.uix.screenmanager import ScreenManager, Screen
+
+
 
 TARGET_POWER = 220   # puissance cible a suivre (W)
 MAX_POWER = 400      # echelle max de la jauge (W)
@@ -89,19 +91,28 @@ class Dashboard(BoxLayout):
     pitch_deg_manuelle = NumericProperty(0)
     acceleration_lin_manuelle = NumericProperty(0)
 
+        
+    duree_str = StringProperty("00:00")
+
     is_running = BooleanProperty(False)
     debug_mode = BooleanProperty(False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.start_time = time.time()
+
+        self._somme_puissance = 0.0    #données a accumuler pour le resume de performance
+        self._nb_echantillons_puissance = 0
+        self._elevation_totale_m = 0.0
+
         Clock.schedule_interval(self.update_distance, 0.5)
         Clock.schedule_interval(self.update_vitesse, 0.5)
         Clock.schedule_interval(self.update_duree, 0.5)
         Clock.schedule_interval(self.update_orientation, 0.5)
         Clock.schedule_interval(self.update_acceleration_lin, 0.5)
         Clock.schedule_interval(self.update_puissance, 0.5)
-        
+
+
 
     def update_distance(self, dt):
         self.distance_parcourue = capteur_vitesse.get_odometre()
@@ -136,7 +147,12 @@ class Dashboard(BoxLayout):
 
     def update_duree(self, dt):
         if self.is_running:
-            self.duree_session+=dt
+            self.duree_session += dt
+            minutes = int(self.duree_session) // 60
+            secondes = int(self.duree_session) % 60
+            self.duree_str = f"{minutes:02d}:{secondes:02d}"
+
+
     def update_puissance(self, dt):
         if self.is_running or self.debug_mode:
             pitch_rad = puissance_estimee.degres_vers_radians(self.pitch_deg)
@@ -144,24 +160,82 @@ class Dashboard(BoxLayout):
             mesures_lues = puissance_estimee.creer_mesures(vitesse_ms, pitch_rad, self.acceleration_lin)
             composantes_puissance = puissance_estimee.estimer_puissance(mesures_lues)
 
-            puissance_roue_clamp = puissance_estimee.puissance_cycliste_w(composantes_puissance)
-            puissance_totale_est = puissance_estimee.puissance_pedalier(puissance_roue_clamp)
-
+            puissance_roue_clampee = puissance_estimee.puissance_cycliste_w(composantes_puissance)
+            puissance_totale_est = puissance_estimee.puissance_pedalier(puissance_roue_clampee)
             self.ids.gauge.current_power = puissance_totale_est
 
+            if self.is_running:  # only accumulate real ride data, not debug taps
+                self._somme_puissance += puissance_totale_est
+                self._nb_echantillons_puissance += 1
+
+                delta_elevation_m = vitesse_ms * sin(pitch_rad) * dt
+                if delta_elevation_m > 0:  # ne compte que la montée (élévation cumulative)
+                    self._elevation_totale_m += delta_elevation_m
+
+    def demarrer_session(self):
+        self._somme_puissance = 0.0
+        self._nb_echantillons_puissance = 0
+        self._elevation_totale_m = 0.0
+        self.duree_session = 0.0
+        self.duree_str = "00:00"
+        capteur_vitesse.reset_odometre()
+
+    def terminer_session(self):
+        duree_h = self.duree_session / 3600.0
+        vitesse_moyenne = self.distance_parcourue / duree_h if duree_h > 0 else 0.0
+        puissance_moyenne = (
+            self._somme_puissance / self._nb_echantillons_puissance
+            if self._nb_echantillons_puissance > 0 else 0.0
+        )
+
+        summary = App.get_running_app().root.get_screen("summary")
+        summary.distance_finale = self.distance_parcourue
+        summary.duree_finale = self.duree_str
+        summary.vitesse_moyenne = vitesse_moyenne
+        summary.puissance_moyenne = puissance_moyenne
+        summary.elevation_totale = self._elevation_totale_m
+
+        App.get_running_app().root.current = "summary"
+
     def toggle_collection(self):
-            self.is_running = not self.is_running
+        if self.is_running:
+            self.terminer_session()
+        else:
+            self.demarrer_session()
+        self.is_running = not self.is_running
+
+
     
     def on_debug_mode(self, instance, value):
         self.ids.debug_switcher.current = 'debug' if value else 'normal'
         
+class DashboardScreen(Screen):
+    pass
+class SummaryScreen(Screen):
+    distance_finale = NumericProperty(0)
+    duree_finale = StringProperty("00:00")
+    vitesse_moyenne = NumericProperty(0)
+    puissance_moyenne = NumericProperty(0)
+    elevation_totale = NumericProperty(0)
 
+    def nouvelle_course(self):
+        app = App.get_running_app()
+        app.dashboard.demarrer_session()
+        app.dashboard.is_running = True
+        self.manager.current = "dashboard"
 
 class PowerApp(App):
     target_power = NumericProperty(TARGET_POWER)
+   
 
     def build(self):
-        return Dashboard()
+        self.dashboard = Dashboard()
+        sm = ScreenManager()
+        dash_screen = DashboardScreen(name="dashboard")
+        dash_screen.add_widget(self.dashboard)
+        sm.add_widget(dash_screen)
+        sm.add_widget(SummaryScreen(name="summary"))
+        return sm
 
     def on_stop(self):
         capteur_vitesse.cleanup()

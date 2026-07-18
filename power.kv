@@ -64,7 +64,7 @@
                         text: f"Acceleration: \n {root.acceleration_lin:.2f} m/s2"
                         font_size: '40sp'
                     Label:
-                        text: f"Duree du trajet: \n {root.duree_session:.2f}"
+                        text: f"Duree du trajet: \n {root.duree_str}"
                         font_size: '35sp'
 
             Screen:
@@ -113,3 +113,38 @@
             size_hint: (0.7, 0.05)
             background_color: (0.5, 0.5, 0.5, 1)
             on_release: root.debug_mode = not root.debug_mode
+
+<SummaryScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: 40
+        spacing: 20
+
+        Label:
+            text: "Résumé de la course"
+            font_size: '50sp'
+            size_hint: (1, 0.15)
+
+        Label:
+            text: f"Distance: {root.distance_finale:.2f} km"
+            font_size: '40sp'
+        Label:
+            text: f"Duree: {root.duree_finale}"
+            font_size: '40sp'
+        Label:
+            text: f"Vitesse moyenne: {root.vitesse_moyenne:.1f} km/h"
+            font_size: '40sp'
+        Label:
+            text: f"Puissance moyenne: {root.puissance_moyenne:.0f} W"
+            font_size: '40sp'
+        Label:
+            text: f"Elevation totale: {root.elevation_totale:.0f} m"
+            font_size: '40sp'
+
+        Button:
+            text: "Nouvelle course"
+            font_size: '35sp'
+            size_hint: (0.6, 0.5)
+            pos_hint: {'center_x': 0.5}
+            background_color: (0.2, 0.8, 0.3, 1)
+            on_release: root.nouvelle_course()
