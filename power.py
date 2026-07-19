@@ -15,6 +15,7 @@ from math import cos, sin, radians
 from capteur_vitesse import CapteurVitesse
 from capteur_imu import CapteurIMU
 import puissance_estimee
+import puissance_cible
 
 from kivy.app import App
 from kivy.uix.widget import Widget
@@ -39,10 +40,11 @@ class PowerGauge(Widget):
     # NumericProperty permet au fichier .kv de "observer" cette valeur
     # et de se mettre a jour automatiquement quand elle change.
     current_power = NumericProperty(0)
+    target_power = NumericProperty(TARGET_POWER)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(size=self.redraw, pos=self.redraw, current_power=self.redraw)
+        self.bind(size=self.redraw, pos=self.redraw, current_power=self.redraw, target_power=self.redraw)
 
 
     def redraw(self, *args):
@@ -56,7 +58,7 @@ class PowerGauge(Widget):
             Line(circle=(cx, cy, radius), width=8)
 
             # Couleur selon l'ecart avec la cible
-            diff = self.current_power - TARGET_POWER
+            diff = self.current_power - self.target_power
             if abs(diff) <= 15:
                 Color(0.2, 0.8, 0.3, 1)   # vert : dans la zone cible
             elif diff > 15:
@@ -71,7 +73,7 @@ class PowerGauge(Widget):
             Line(circle=(cx, cy, radius, angle_start, angle_end), width=8, cap='round')
 
             # Marqueur de la cible (petit trait blanc)
-            target_angle = radians(90 - (TARGET_POWER / MAX_POWER) * 360)
+            target_angle = radians(90 - (self.target_power / MAX_POWER) * 360)
             x1 = cx + (radius - 15) * cos(target_angle)
             y1 = cy + (radius - 15) * sin(target_angle)
             x2 = cx + (radius + 15) * cos(target_angle)
@@ -111,6 +113,7 @@ class Dashboard(BoxLayout):
         Clock.schedule_interval(self.update_orientation, 0.5)
         Clock.schedule_interval(self.update_acceleration_lin, 0.5)
         Clock.schedule_interval(self.update_puissance, 0.5)
+        Clock.schedule_interval(self.update_target_power, 0.5)
 
 
 
@@ -172,6 +175,11 @@ class Dashboard(BoxLayout):
                 if delta_elevation_m > 0:  # ne compte que la montée (élévation cumulative)
                     self._elevation_totale_m += delta_elevation_m
 
+    def update_target_power(self, dt):
+        if self.is_running:
+            cible = puissance_cible.puissance_cible(self.pitch_deg)
+            App.get_running_app().target_power = cible
+
     def demarrer_session(self):
         self._somme_puissance = 0.0
         self._nb_echantillons_puissance = 0
@@ -226,8 +234,7 @@ class SummaryScreen(Screen):
 
 class PowerApp(App):
     target_power = NumericProperty(TARGET_POWER)
-   
-
+    
     def build(self):
         self.dashboard = Dashboard()
         sm = ScreenManager()

@@ -13,7 +13,7 @@
     BoxLayout:
         orientation: 'vertical'
         Label:
-            text: f"Cible : {app.target_power} W"
+            text: f"Cible : {app.target_power:.0f} W"
             font_size: '40sp'
             color: 0.7, 0.7, 0.7, 1
             size_hint: (1, 0.1)
@@ -21,6 +21,7 @@
         PowerGauge:
             id: gauge
             size_hint: (1.2, 0.75)
+            target_power: app.target_power
         FloatLayout:
             size_hint: (1, 0.5)      # même taille que ta PowerGauge avant
             Label:
