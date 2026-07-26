@@ -16,6 +16,7 @@ from capteur_vitesse import CapteurVitesse
 from capteur_imu import CapteurIMU
 import puissance_estimee
 import puissance_cible
+from journal_course import JournalCourse
 
 from kivy.app import App
 from kivy.uix.widget import Widget
@@ -92,8 +93,30 @@ class Dashboard(BoxLayout):
     vitesse_manuelle = NumericProperty(0)
     pitch_deg_manuelle = NumericProperty(0)
     acceleration_lin_manuelle = NumericProperty(0)
+    # In Dashboard
+    pitch_offset_deg = NumericProperty(0)
+    calibration_en_cours = BooleanProperty(False)
 
-        
+    def calibrer_pitch(self, duree_s=3.0, dt_echantillon=0.1):
+        """Moyenne le pitch mesure pendant `duree_s` secondes pour en faire
+        un offset. Le velo doit etre immobile et sur terrain plat/horizontal."""
+        self.calibration_en_cours = True
+        self._echantillons_calib = []
+
+        def _capter(dt):
+            _, pitch, _ = capteur_imu.get_orientation()
+            self._echantillons_calib.append(pitch)
+
+        def _terminer_calib(dt):
+            event_capture.cancel()
+            if self._echantillons_calib:
+                self.pitch_offset_deg = sum(self._echantillons_calib) / len(self._echantillons_calib)
+            self.calibration_en_cours = False
+
+        event_capture = Clock.schedule_interval(_capter, dt_echantillon)
+        Clock.schedule_once(_terminer_calib, duree_s)
+
+            
     duree_str = StringProperty("00:00")
 
     is_running = BooleanProperty(False)
@@ -102,6 +125,8 @@ class Dashboard(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.start_time = time.time()
+
+        self.journal = JournalCourse()
 
         self._somme_puissance = 0.0    #données a accumuler pour le resume de performance
         self._nb_echantillons_puissance = 0
@@ -128,13 +153,13 @@ class Dashboard(BoxLayout):
                 self.vitesse = capteur_vitesse.get_vitesse()
             else:
                 self.vitesse = 0
-    def update_orientation(self,dt):
+    def update_orientation(self, dt):
         if self.debug_mode:
-            self.pitch_deg=self.pitch_deg_manuelle
+            self.pitch_deg = self.pitch_deg_manuelle
         else:
             if self.is_running:
-                (yaw, pitch, roll)=capteur_imu.get_orientation()
-                self.pitch_deg = pitch 
+                (yaw, pitch, roll) = capteur_imu.get_orientation()
+                self.pitch_deg = pitch - self.pitch_offset_deg
             else:
                 self.pitch_deg = 0
     
@@ -174,6 +199,13 @@ class Dashboard(BoxLayout):
                 delta_elevation_m = vitesse_ms * sin(pitch_rad) * dt
                 if delta_elevation_m > 0:  # ne compte que la montée (élévation cumulative)
                     self._elevation_totale_m += delta_elevation_m
+            self.journal.ajouter_echantillon(
+                vitesse=self.vitesse,
+                distance=self.distance_parcourue,
+                pitch=self.pitch_deg,
+                accel=self.acceleration_lin,
+                puissance=puissance_totale_est,
+                cible=App.get_running_app().target_power)
 
     def update_target_power(self, dt):
         if self.is_running:
@@ -187,6 +219,7 @@ class Dashboard(BoxLayout):
         self.duree_session = 0.0
         self.duree_str = "00:00"
         capteur_vitesse.reset_odometre()
+        self.journal.demarrer()
 
     def terminer_session(self):
         duree_h = self.duree_session / 3600.0
@@ -204,6 +237,7 @@ class Dashboard(BoxLayout):
         summary.elevation_totale = self._elevation_totale_m
 
         App.get_running_app().root.current = "summary"
+        self.journal.arreter()
 
     def toggle_collection(self):
         if self.is_running:
