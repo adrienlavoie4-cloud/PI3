@@ -1,11 +1,11 @@
 #Donnees du test de puissance critique a entrer
 #FTP
-#puissance max pour effort 3 min
-#puissance max pour effort 10 min
-#puissance max pour effort 18 min
+#puissance max pour effort 3 min: puissance moyenne:416W
+#puissance max pour effort 10 min: puissance moyenne:295W
+#puissance max pour effort 18 min: puissance moyenne:265W
 
 
-FTP=220
+FTP=222
 
 
 def puissance_cible(pitch_deg,ftp=FTP):

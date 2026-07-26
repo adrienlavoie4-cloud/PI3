@@ -1,10 +1,3 @@
-"""
-journal_course.py
-
-Enregistre les donnees d'une course dans un fichier CSV, une ligne
-par echantillon, pour analyse/comparaison ulterieure (ex: Runkeeper).
-"""
-
 import csv
 import os
 import time

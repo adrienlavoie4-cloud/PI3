@@ -1,13 +1,3 @@
-"""
-Exemple KIVY : jauge circulaire de puissance cycliste
-Version separee : main.py (logique) + power.kv (interface/style)
-
-Kivy charge power.kv AUTOMATIQUEMENT car il porte le meme nom que
-la classe App, en minuscules et sans le suffixe "App" :
-    PowerApp  ->  power.kv
-Les deux fichiers doivent etre dans le meme dossier.
-"""
-
 import time
 from math import cos, sin, radians
 

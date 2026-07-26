@@ -1,19 +1,3 @@
-"""
-plot_course.py
-
-Trace les graphiques d'une course a partir du CSV genere par
-journal_course.py.
-
-Usage:
-    python plot_course.py chemin/vers/course_2026-07-26_18-30-00.csv
-
-Genere un fichier PNG a cote du CSV (meme nom, extension .png) et
-l'affiche a l'ecran si un affichage graphique est disponible.
-
-Dependances : pandas, matplotlib
-    pip install pandas matplotlib
-"""
-
 import sys
 import os
 
@@ -89,12 +73,8 @@ def main():
     fig.savefig(chemin_png, dpi=150)
     print(f"\nGraphique sauvegarde : {chemin_png}")
 
-    try:
-        plt.show()
-    except Exception:
-        # Pas d'affichage graphique disponible (ex: SSH sans X11) - ce n'est pas grave,
-        # le PNG est deja sauvegarde.
-        pass
+    plt.show()
+
 
 
 if __name__ == "__main__":

@@ -1,10 +1,3 @@
-"""
-capteur_vitesse.py
-
-Librairie pour mesurer la vitesse et la distance parcourue a partir
-d'un capteur a impulsions (reed switch / capteur Hall) monte sur une roue.
-"""
-
 import time
 import threading
 import RPi.GPIO as GPIO

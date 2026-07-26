@@ -1,26 +1,3 @@
-"""
-capteur_imu.py
-
-Librairie pour lire un capteur d'orientation/mouvement BNO085 (UART)
-et exposer ses valeurs (orientation, acceleration, gyroscope, etc.)
-de facon thread-safe pour une interface graphique.
-
-Usage typique dans un fichier GUI :
-
-    from capteur_imu import CapteurIMU
-
-    imu = CapteurIMU(port="/dev/serial0")
-    imu.init()
-
-    ...
-    yaw, pitch, roll = imu.get_orientation()
-    ax, ay, az = imu.get_acceleration()
-    ...
-
-    # a la fermeture du programme
-    imu.cleanup()
-"""
-
 import math
 import time
 import threading
