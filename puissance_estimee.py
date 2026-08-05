@@ -14,6 +14,7 @@ Références :
 
 
 import math
+from collections import deque
 from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
@@ -37,6 +38,9 @@ RAYON_PNEU_M = 0.35  # r : rayon extérieur du pneu (700c ≈ 0,35 m)
 # Options
 INCLURE_FROTTEMENT_ROULEMENTS = True  # terme (91 + 8,7·Vg)·10⁻³
 EFFICACITE_CHAINE = 0.976  # Ec : pertes de chaîne (~2,4 %), optionnel
+MOYENNE_MOBILE_FENETRE = 20  # ~10 s à 0,5 s/échantillon
+ACCELERATION_DEADBAND_MS2 = 0.10
+ACCELERATION_MAX_MS2 = 2.0
 
 
 # ---------------------------------------------------------------------------
@@ -229,3 +233,97 @@ def acceleration_par_difference_finie(
 
 def creer_mesures(vitesse_sol_ms: float, pitch_rad: float, acceleration_ms2: float) -> Mesures:
     return Mesures(vitesse_sol_ms=vitesse_sol_ms, pitch_rad=pitch_rad, acceleration_ms2=acceleration_ms2)
+
+
+# ---------------------------------------------------------------------------
+# Lissage par moyenne mobile
+# ---------------------------------------------------------------------------
+
+class MoyenneMobile:
+    """Moyenne glissante pour le flux temps réel (ex. affichage de la puissance)."""
+
+    def __init__(self, fenetre: int = MOYENNE_MOBILE_FENETRE):
+        self.fenetre = max(1, fenetre)
+        self._buffer: deque[float] = deque(maxlen=self.fenetre)
+
+    def ajouter(self, valeur: float) -> float:
+        self._buffer.append(valeur)
+        return sum(self._buffer) / len(self._buffer)
+
+    def reinitialiser(self) -> None:
+        self._buffer.clear()
+
+
+def moyenne_mobile_serie(
+    valeurs: list[float],
+    fenetre: int = MOYENNE_MOBILE_FENETRE,
+) -> list[float]:
+    """Applique une moyenne mobile à une série complète (ex. replay d'une course)."""
+    if fenetre <= 1:
+        return list(valeurs)
+
+    result: list[float] = []
+    buffer: deque[float] = deque(maxlen=fenetre)
+    for valeur in valeurs:
+        buffer.append(valeur)
+        result.append(sum(buffer) / len(buffer))
+    return result
+
+
+def filtrer_acceleration(
+    acceleration_ms2: float,
+    *,
+    deadband_ms2: float = ACCELERATION_DEADBAND_MS2,
+    max_ms2: float = ACCELERATION_MAX_MS2,
+) -> float:
+    """Deadband et plafond appliqués après le lissage."""
+    if abs(acceleration_ms2) < deadband_ms2:
+        return 0.0
+    return max(-max_ms2, min(acceleration_ms2, max_ms2))
+
+
+def filtrer_acceleration_serie(
+    valeurs: list[float],
+    fenetre: int = MOYENNE_MOBILE_FENETRE,
+    *,
+    deadband_ms2: float = ACCELERATION_DEADBAND_MS2,
+    max_ms2: float = ACCELERATION_MAX_MS2,
+) -> list[float]:
+    """Même pipeline d'accélération que power.py, pour --recalculer."""
+    return [
+        filtrer_acceleration(a, deadband_ms2=deadband_ms2, max_ms2=max_ms2)
+        for a in moyenne_mobile_serie(valeurs, fenetre)
+    ]
+
+
+def estimer_puissance_pedalier(
+    vitesse_kmh: float,
+    pitch_deg: float,
+    acceleration_ms2: float,
+    *,
+    mt: float = MASSE_TOTALE_KG,
+    cda: float = CDA,
+    crr: float = CRR,
+    inertie_roues: float = INERTIE_ROUES_KGM2,
+    rayon: float = RAYON_PNEU_M,
+    inclure_frottement_roulements: bool = INCLURE_FROTTEMENT_ROULEMENTS,
+    deadband_w: float = 2.0,
+    ec: float = EFFICACITE_CHAINE,
+) -> float:
+    """Chaîne complète vitesse/pitch/accélération → puissance au pédalier (W)."""
+    mesures = creer_mesures(
+        kmh_vers_ms(vitesse_kmh),
+        degres_vers_radians(pitch_deg),
+        acceleration_ms2,
+    )
+    composantes = estimer_puissance(
+        mesures,
+        mt=mt,
+        cda=cda,
+        crr=crr,
+        inertie_roues=inertie_roues,
+        rayon=rayon,
+        inclure_frottement_roulements=inclure_frottement_roulements,
+    )
+    puissance_roue = puissance_cycliste_w(composantes, deadband_w=deadband_w)
+    return puissance_pedalier(puissance_roue, ec=ec)

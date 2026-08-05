@@ -67,6 +67,7 @@ class CapteurIMU:
         self._linear = (0.0, 0.0, 0.0)
         self._gravity = (0.0, 0.0, 0.0)
         self._steps = 0
+        self._temps_derniere_lecture = None
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -144,9 +145,14 @@ class CapteurIMU:
             return self._mag
 
     def get_acceleration_lineaire(self):
-        """Retourne (x, y, z) en m/s^2, acceleration sans la gravite."""
         with self._lock:
-            return self._linear
+            if self._temps_derniere_lecture is None:
+                return (0.0, 0.0, 0.0), False
+
+            age = time.monotonic() - self._temps_derniere_lecture
+            valide = age < 1.5
+
+            return self._linear, valide
 
     def get_gravite(self):
         """Retourne (x, y, z) en m/s^2, vecteur de gravite seul."""

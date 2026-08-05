@@ -6,6 +6,7 @@ from capteur_vitesse import CapteurVitesse
 from capteur_imu import CapteurIMU
 import puissance_estimee
 import puissance_cible
+from collections import deque
 from journal_course import JournalCourse
 
 from kivy.app import App
@@ -23,9 +24,9 @@ TARGET_POWER = 220   # puissance cible a suivre (W)
 MAX_POWER = 400      # echelle max de la jauge (W)
 
 
-capteur_vitesse = CapteurVitesse(pin=4)
+capteur_vitesse = CapteurVitesse(pin=4, taille_moyenne_mobile=4) # taille_moyenne_mobile ajustée pour avoir une courbe plus lisse mais avec moins de latence
 capteur_vitesse.init() 
-capteur_imu = CapteurIMU()
+capteur_imu = CapteurIMU(intervalle_lecture=0.1) # intervalle_lecture ajusté pour avoir une courbe plus lisse mais avec moins de latence
 capteur_imu.init()
 class PowerGauge(Widget):
     # NumericProperty permet au fichier .kv de "observer" cette valeur
@@ -121,16 +122,65 @@ class Dashboard(BoxLayout):
         self._somme_puissance = 0.0    #données a accumuler pour le resume de performance
         self._nb_echantillons_puissance = 0
         self._elevation_totale_m = 0.0
+        self._moyenne_mobile_puissance = puissance_estimee.MoyenneMobile()
+        self._moyenne_mobile_pitch = puissance_estimee.MoyenneMobile(fenetre=25)
+        self._moyenne_mobile_acceleration = puissance_estimee.MoyenneMobile(fenetre=12)
+        # Historique utilisé pour calculer l'accélération à partir de la vitesse Hall.
+        self._historique_vitesse_acceleration = deque(maxlen=11)
 
         Clock.schedule_interval(self.update_distance, 0.5)
         Clock.schedule_interval(self.update_vitesse, 0.5)
         Clock.schedule_interval(self.update_duree, 0.5)
-        Clock.schedule_interval(self.update_orientation, 0.5)
-        Clock.schedule_interval(self.update_acceleration_lin, 0.5)
-        Clock.schedule_interval(self.update_puissance, 0.5)
+        Clock.schedule_interval(self.update_orientation, 0.1)
+        #Clock.schedule_interval(self.update_acceleration_lin, 0.5)
+        Clock.schedule_interval(self.update_puissance, 0.2)
         Clock.schedule_interval(self.update_target_power, 0.5)
 
+        self._derniere_acceleration_hall = 0.0
 
+
+
+    def calculer_acceleration_hall(self, vitesse_ms: float) -> float:
+        """
+        Calcule l'accélération longitudinale à partir de la vitesse Hall.
+
+        L'accélération est calculée entre la valeur actuelle et la plus
+        ancienne valeur de la fenêtre, soit environ 2 secondes lorsque
+        update_puissance est appelée toutes les 0,5 seconde.
+        """
+        temps_actuel = time.monotonic()
+
+        self._historique_vitesse_acceleration.append((temps_actuel, vitesse_ms))
+
+        # Il faut au moins deux mesures pour calculer une dérivée.
+        if len(self._historique_vitesse_acceleration) < 2:
+            self._derniere_acceleration_hall = 0.0
+            return 0.0
+
+        temps_initial, vitesse_initiale = (self._historique_vitesse_acceleration[0])
+
+        delta_t_s = temps_actuel - temps_initial
+
+        acceleration = (puissance_estimee.acceleration_par_difference_finie(
+                vitesse_finale_ms=vitesse_ms,
+                vitesse_initiale_ms=vitesse_initiale,
+                delta_t_s=delta_t_s,))
+
+        # Rejet d'une accélération manifestement irréaliste.
+        # Une valeur aberrante peut notamment être causée par le watchdog
+        # du capteur Hall lorsqu'il fait passer la vitesse directement à zéro.
+        acceleration_max_ms2 = 3.0
+
+        if abs(acceleration) > acceleration_max_ms2:
+            return self._derniere_acceleration_hall
+
+        # Petite zone morte pour éviter les variations de puissance
+        # lorsque la vitesse est presque constante.
+        if abs(acceleration) < 0.05:
+            acceleration = 0.0
+
+        self._derniere_acceleration_hall = acceleration
+        return acceleration
 
     def update_distance(self, dt):
         self.distance_parcourue = capteur_vitesse.get_odometre()
@@ -144,24 +194,33 @@ class Dashboard(BoxLayout):
             else:
                 self.vitesse = 0
     def update_orientation(self, dt):
+        if not self.is_running and not self.debug_mode:
+            self.pitch_deg = 0
+            return
         if self.debug_mode:
-            self.pitch_deg = self.pitch_deg_manuelle
+            pitch_brut = self.pitch_deg_manuelle
         else:
-            if self.is_running:
-                (yaw, pitch, roll) = capteur_imu.get_orientation()
-                self.pitch_deg = pitch - self.pitch_offset_deg
-            else:
-                self.pitch_deg = 0
+            (_, pitch, _) = capteur_imu.get_orientation()
+            pitch_brut = pitch - self.pitch_offset_deg
+        self.pitch_deg = self._moyenne_mobile_pitch.ajouter(pitch_brut)
     
-    def update_acceleration_lin(self,dt):
+    def update_acceleration_lin(self, dt):
         if self.debug_mode:
-            self.acceleration_lin=self.acceleration_lin_manuelle
-        else:
-            if self.is_running:
-                (x,y,z)=capteur_imu.get_acceleration_lineaire()
-                self.acceleration_lin=x #TODO: confirmer l'axe une fois le capteur monté sur le vélo
-            else:
-                self.acceleration_lin=0
+            self.acceleration_lin = self.acceleration_lin_manuelle
+            return
+
+        if not self.is_running:
+            self.acceleration_lin = 0.0
+            return
+
+        (x, y, z), valide = capteur_imu.get_acceleration_lineaire()
+
+        if not valide:
+            self.acceleration_lin = 0.0
+            return
+
+        acceleration_filtree = self._moyenne_mobile_acceleration.ajouter(x)
+        self.acceleration_lin = puissance_estimee.filtrer_acceleration(acceleration_filtree)
 
     def update_duree(self, dt):
         if self.is_running:
@@ -172,30 +231,98 @@ class Dashboard(BoxLayout):
 
 
     def update_puissance(self, dt):
-        if self.is_running or self.debug_mode:
-            pitch_rad = puissance_estimee.degres_vers_radians(self.pitch_deg)
-            vitesse_ms = puissance_estimee.kmh_vers_ms(self.vitesse)
-            mesures_lues = puissance_estimee.creer_mesures(vitesse_ms, pitch_rad, self.acceleration_lin)
-            composantes_puissance = puissance_estimee.estimer_puissance(mesures_lues)
+        if not (self.is_running or self.debug_mode):
+            return
 
-            puissance_roue_clampee = puissance_estimee.puissance_cycliste_w(composantes_puissance)
-            puissance_totale_est = puissance_estimee.puissance_pedalier(puissance_roue_clampee)
-            self.ids.gauge.current_power = puissance_totale_est
+        # --------------------------------------------------------------
+        # 1. Préparation des mesures
+        # --------------------------------------------------------------
+        pitch_rad = puissance_estimee.degres_vers_radians(self.pitch_deg)
 
-            if self.is_running:  # only accumulate real ride data, not debug taps
-                self._somme_puissance += puissance_totale_est
-                self._nb_echantillons_puissance += 1
+        vitesse_ms = puissance_estimee.kmh_vers_ms(self.vitesse)
 
-                delta_elevation_m = vitesse_ms * sin(pitch_rad) * dt
-                if delta_elevation_m > 0:  # ne compte que la montée (élévation cumulative)
-                    self._elevation_totale_m += delta_elevation_m
-            self.journal.ajouter_echantillon(
-                vitesse=self.vitesse,
-                distance=self.distance_parcourue,
-                pitch=self.pitch_deg,
-                accel=self.acceleration_lin,
-                puissance=puissance_totale_est,
-                cible=App.get_running_app().target_power)
+        if self.debug_mode:
+            acceleration_ms2 = self.acceleration_lin_manuelle
+        else:
+            acceleration_ms2 = self.calculer_acceleration_hall(vitesse_ms)
+
+        self.acceleration_lin = acceleration_ms2
+
+        # --------------------------------------------------------------
+        # 2. Validation des entrées
+        # --------------------------------------------------------------
+        vitesse_max_ms = puissance_estimee.kmh_vers_ms(60.0)
+        pitch_max_rad = puissance_estimee.degres_vers_radians(25.0)
+        acceleration_max_ms2 = 3.0
+
+        mesures_valides = (
+            0.0 <= vitesse_ms <= vitesse_max_ms
+            and -pitch_max_rad <= pitch_rad <= pitch_max_rad
+            and -acceleration_max_ms2<= acceleration_ms2<= acceleration_max_ms2)
+
+        if not mesures_valides:
+            # On ignore l'échantillon invalide et conserve la dernière
+            # puissance affichée.
+            return
+
+        # --------------------------------------------------------------
+        # 3. Calcul des composantes de puissance
+        # --------------------------------------------------------------
+        mesures_lues = puissance_estimee.creer_mesures(
+            vitesse_sol_ms=vitesse_ms,
+            pitch_rad=pitch_rad,
+            acceleration_ms2=acceleration_ms2,)
+
+        composantes_puissance = puissance_estimee.estimer_puissance(mesures_lues)
+
+        # La puissance reste signée pendant le filtrage.
+        puissance_roue_signee = (composantes_puissance.total_roue_w)
+
+        # --------------------------------------------------------------
+        # 4. Lissage avant la limitation à zéro
+        # --------------------------------------------------------------
+        puissance_roue_lissee = (self._moyenne_mobile_puissance.ajouter(puissance_roue_signee))
+
+        # Deadband appliqué après le lissage.
+        deadband_w = 2.0
+
+
+        if puissance_roue_lissee <= deadband_w:
+            puissance_roue_positive = 0.0
+        else:
+            puissance_roue_positive = puissance_roue_lissee
+
+        # Conversion de la puissance à la roue vers la puissance au pédalier.
+        puissance_pedalier_w = puissance_estimee.puissance_pedalier(puissance_roue_positive)
+
+        # --------------------------------------------------------------
+        # 5. Mise à jour de l'affichage
+        # --------------------------------------------------------------
+        self.ids.gauge.current_power = puissance_pedalier_w
+
+        # --------------------------------------------------------------
+        # 6. Mise à jour des statistiques de la course
+        # --------------------------------------------------------------
+        if self.is_running:
+            self._somme_puissance += puissance_pedalier_w
+            self._nb_echantillons_puissance += 1
+
+            delta_elevation_m = (vitesse_ms* sin(pitch_rad)* dt)
+
+            # L'élévation cumulative compte uniquement les montées.
+            if delta_elevation_m > 0.0:
+                self._elevation_totale_m += delta_elevation_m
+
+        # --------------------------------------------------------------
+        # 7. Enregistrement dans le journal
+        # --------------------------------------------------------------
+        self.journal.ajouter_echantillon(
+            vitesse=self.vitesse,
+            distance=self.distance_parcourue,
+            pitch=self.pitch_deg,
+            accel=acceleration_ms2,
+            puissance=puissance_pedalier_w,
+            cible=App.get_running_app().target_power,)
 
     def update_target_power(self, dt):
         if self.is_running:
@@ -203,9 +330,17 @@ class Dashboard(BoxLayout):
             App.get_running_app().target_power = cible
 
     def demarrer_session(self):
+
+        self._historique_vitesse_acceleration.clear()
+        self._derniere_acceleration_hall = 0.0
+        self.acceleration_lin = 0.0
+
         self._somme_puissance = 0.0
         self._nb_echantillons_puissance = 0
         self._elevation_totale_m = 0.0
+        self._moyenne_mobile_puissance.reinitialiser()
+        self._moyenne_mobile_pitch.reinitialiser()
+        self._moyenne_mobile_acceleration.reinitialiser()
         self.duree_session = 0.0
         self.duree_str = "00:00"
         capteur_vitesse.reset_odometre()
