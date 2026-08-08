@@ -1,6 +1,6 @@
 import time
 from math import cos, sin, radians
-
+from statistics import median
 
 from capteur_vitesse import CapteurVitesse
 from capteur_imu import CapteurIMU
@@ -24,7 +24,7 @@ TARGET_POWER = 220   # puissance cible a suivre (W)
 MAX_POWER = 400      # echelle max de la jauge (W)
 
 
-capteur_vitesse = CapteurVitesse(pin=4, taille_moyenne_mobile=4) # taille_moyenne_mobile ajustée pour avoir une courbe plus lisse mais avec moins de latence
+capteur_vitesse = CapteurVitesse(pin=4, taille_moyenne_mobile=6) # taille_moyenne_mobile ajustée pour avoir une courbe plus lisse mais avec moins de latence
 capteur_vitesse.init() 
 capteur_imu = CapteurIMU(intervalle_lecture=0.2) # intervalle_lecture ajusté pour avoir une courbe plus lisse mais avec moins de latence
 capteur_imu.init()
@@ -172,19 +172,22 @@ class Dashboard(BoxLayout):
         self._somme_puissance = 0.0    #données a accumuler pour le resume de performance
         self._nb_echantillons_puissance = 0
         self._elevation_totale_m = 0.0
-        self._moyenne_mobile_puissance = puissance_estimee.MoyenneMobile(fenetre=12)
-        self._moyenne_mobile_pitch = puissance_estimee.MoyenneMobile(fenetre=25)
+        self._moyenne_mobile_puissance = puissance_estimee.MoyenneMobile(fenetre=25)
+        self._moyenne_mobile_pitch = puissance_estimee.MoyenneMobile(fenetre=15)
         # Historique utilisé pour calculer l'accélération à partir de la vitesse Hall.
         self._historique_vitesse_acceleration = deque(maxlen=11)
 
         self._derniere_acceleration_hall = 0.0
         self._temps_dernier_avertissement_imu = 0.0
 
+        self._historique_pitch_median = deque(maxlen=5)
+        self._dernier_pitch_filtre = None
+        self._temps_dernier_pitch_filtre = None
+
         Clock.schedule_interval(self.update_distance, 0.5)
         Clock.schedule_interval(self.update_vitesse, 0.2)
         Clock.schedule_interval(self.update_duree, 0.5)
-        Clock.schedule_interval(self.update_orientation, 0.1)
-        #Clock.schedule_interval(self.update_acceleration_lin, 0.5)
+        Clock.schedule_interval(self.update_orientation, 0.2)
         Clock.schedule_interval(self.update_puissance, 0.2)
         Clock.schedule_interval(self.update_target_power, 0.5)
 
@@ -253,36 +256,114 @@ class Dashboard(BoxLayout):
             pitch_brut = self.pitch_deg_manuelle
 
         else:
+            # ------------------------------------------------------
+            # Vérification de la communication
+            # ------------------------------------------------------
             if not capteur_imu.donnees_valides():
                 maintenant = time.monotonic()
 
-                if (maintenant
+                if (
+                    maintenant
                     - self._temps_dernier_avertissement_imu
                     >= 2.0
                 ):
                     erreur = capteur_imu.get_derniere_erreur()
                     age = capteur_imu.get_age_derniere_lecture()
 
-                    if age is None:
-                        age_texte = "aucune lecture reçue"
-                    else:
-                        age_texte = f"{age:.2f} s"
-
                     print(
                         "Orientation BNO085 indisponible : "
-                        f"âge={age_texte}, "
-                        f"erreur={erreur}")
+                        f"âge={age}, erreur={erreur}"
+                    )
 
-                    self._temps_dernier_avertissement_imu = (maintenant)
+                    self._temps_dernier_avertissement_imu = (
+                        maintenant
+                    )
 
-                # Ne pas utiliser l'ancienne orientation.
+                # Ne pas ajouter l'ancienne orientation au filtre.
                 return
 
             _, pitch, _ = capteur_imu.get_orientation()
-            pitch_brut = pitch - self.pitch_offset_deg
 
-        self.pitch_deg = (self._moyenne_mobile_pitch.ajouter(pitch_brut))
-    
+            pitch_brut = (
+                pitch
+                - self.pitch_offset_deg
+            )
+
+        # ----------------------------------------------------------
+        # 1. Rejet des valeurs hors de la plage physique
+        # ----------------------------------------------------------
+        PITCH_MIN_DEG = -15.0
+        PITCH_MAX_DEG = 15.0
+
+        if not PITCH_MIN_DEG <= pitch_brut <= PITCH_MAX_DEG:
+            print(
+                "Pitch rejeté, hors plage : "
+                f"{pitch_brut:.2f}°"
+            )
+            return
+
+        # ----------------------------------------------------------
+        # 2. Filtre médian
+        # ----------------------------------------------------------
+        self._historique_pitch_median.append(pitch_brut)
+
+        pitch_median = median(self._historique_pitch_median)
+
+        # ----------------------------------------------------------
+        # 3. Limitation de la vitesse de variation
+        # ----------------------------------------------------------
+        temps_actuel = time.monotonic()
+
+        if (
+            self._dernier_pitch_filtre is None
+            or self._temps_dernier_pitch_filtre is None
+        ):
+            pitch_limite = pitch_median
+
+        else:
+            delta_t = (
+                temps_actuel
+                - self._temps_dernier_pitch_filtre
+            )
+
+            # Le pitch accepté peut varier au maximum de 3°/s.
+            vitesse_max_pitch_deg_s = 3.0
+
+            variation_max_deg = (
+                vitesse_max_pitch_deg_s
+                * delta_t
+            )
+
+            variation_demandee = (
+                pitch_median
+                - self._dernier_pitch_filtre
+            )
+
+            variation_limitee = max(
+                -variation_max_deg,
+                min(
+                    variation_demandee,
+                    variation_max_deg,
+                ),
+            )
+
+            pitch_limite = (
+                self._dernier_pitch_filtre
+                + variation_limitee
+            )
+
+        self._dernier_pitch_filtre = pitch_limite
+        self._temps_dernier_pitch_filtre = temps_actuel
+
+        # ----------------------------------------------------------
+        # 4. Moyenne mobile finale
+        # ----------------------------------------------------------
+        self.pitch_deg = (
+            self._moyenne_mobile_pitch.ajouter(
+                pitch_limite
+            )
+        )
+
     def update_duree(self, dt):
         if self.is_running:
             self.duree_session += dt
@@ -402,6 +483,10 @@ class Dashboard(BoxLayout):
         self._historique_vitesse_acceleration.clear()
         self._derniere_acceleration_hall = 0.0
         self.acceleration_lin = 0.0
+
+        self._historique_pitch_median.clear()
+        self._dernier_pitch_filtre = None
+        self._temps_dernier_pitch_filtre = None
 
         self._somme_puissance = 0.0
         self._nb_echantillons_puissance = 0
