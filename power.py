@@ -88,25 +88,75 @@ class Dashboard(BoxLayout):
     pitch_offset_deg = NumericProperty(0)
     calibration_en_cours = BooleanProperty(False)
 
-    def calibrer_pitch(self, duree_s=3.0, dt_echantillon=0.1):
-        """Moyenne le pitch mesure pendant `duree_s` secondes pour en faire
-        un offset. Le velo doit etre immobile et sur terrain plat/horizontal."""
+    def calibrer_pitch(
+        self,
+        duree_s=5.0,
+        dt_echantillon=0.5,
+    ):
+        """
+        Calcule l'offset du pitch.
+
+        Le vélo doit être immobile et placé sur une surface
+        horizontale pendant toute la calibration.
+        """
         self.calibration_en_cours = True
         self._echantillons_calib = []
 
         def _capter(dt):
+            if not capteur_imu.donnees_valides():
+                erreur = capteur_imu.get_derniere_erreur()
+
+                print(
+                    "Orientation BNO085 indisponible "
+                    f"pendant la calibration : {erreur}"
+                )
+                return
+
             _, pitch, _ = capteur_imu.get_orientation()
             self._echantillons_calib.append(pitch)
 
         def _terminer_calib(dt):
             event_capture.cancel()
-            if self._echantillons_calib:
-                self.pitch_offset_deg = sum(self._echantillons_calib) / len(self._echantillons_calib)
+
+            # Une calibration de 5 secondes devrait normalement
+            # fournir environ 10 échantillons. On en exige 8 afin
+            # de tolérer quelques lectures manquées.
+            nombre_minimum_echantillons = 8
+
+            if (
+                len(self._echantillons_calib)
+                >= nombre_minimum_echantillons
+            ):
+                self.pitch_offset_deg = (
+                    sum(self._echantillons_calib)
+                    / len(self._echantillons_calib)
+                )
+
+                print(
+                    "Calibration terminée : "
+                    f"{self.pitch_offset_deg:.2f}°, "
+                    f"{len(self._echantillons_calib)} "
+                    "échantillons"
+                )
+
+            else:
+                print(
+                    "Calibration échouée : seulement "
+                    f"{len(self._echantillons_calib)} "
+                    "échantillons valides"
+                )
+
             self.calibration_en_cours = False
 
-        event_capture = Clock.schedule_interval(_capter, dt_echantillon)
-        Clock.schedule_once(_terminer_calib, duree_s)
+        event_capture = Clock.schedule_interval(
+            _capter,
+            dt_echantillon,
+        )
 
+        Clock.schedule_once(
+            _terminer_calib,
+            duree_s,
+        )
             
     duree_str = StringProperty("00:00")
 
@@ -122,14 +172,13 @@ class Dashboard(BoxLayout):
         self._somme_puissance = 0.0    #données a accumuler pour le resume de performance
         self._nb_echantillons_puissance = 0
         self._elevation_totale_m = 0.0
-        self._moyenne_mobile_puissance = puissance_estimee.MoyenneMobile()
+        self._moyenne_mobile_puissance = puissance_estimee.MoyenneMobile(fenetre=12)
         self._moyenne_mobile_pitch = puissance_estimee.MoyenneMobile(fenetre=25)
-        self._moyenne_mobile_acceleration = puissance_estimee.MoyenneMobile(fenetre=12)
         # Historique utilisé pour calculer l'accélération à partir de la vitesse Hall.
         self._historique_vitesse_acceleration = deque(maxlen=11)
 
         Clock.schedule_interval(self.update_distance, 0.5)
-        Clock.schedule_interval(self.update_vitesse, 0.5)
+        Clock.schedule_interval(self.update_vitesse, 0.2)
         Clock.schedule_interval(self.update_duree, 0.5)
         Clock.schedule_interval(self.update_orientation, 0.1)
         #Clock.schedule_interval(self.update_acceleration_lin, 0.5)
@@ -142,11 +191,9 @@ class Dashboard(BoxLayout):
 
     def calculer_acceleration_hall(self, vitesse_ms: float) -> float:
         """
-        Calcule l'accélération longitudinale à partir de la vitesse Hall.
-
-        L'accélération est calculée entre la valeur actuelle et la plus
-        ancienne valeur de la fenêtre, soit environ 2 secondes lorsque
-        update_puissance est appelée toutes les 0,5 seconde.
+        L'accélération est calculée sur environ deux secondes,
+        car la fenêtre contient 11 mesures obtenues toutes les
+        0,2 seconde.
         """
         temps_actuel = time.monotonic()
 
@@ -195,33 +242,33 @@ class Dashboard(BoxLayout):
                 self.vitesse = 0
     def update_orientation(self, dt):
         if not self.is_running and not self.debug_mode:
-            self.pitch_deg = 0
+            self.pitch_deg = 0.0
             return
+
         if self.debug_mode:
             pitch_brut = self.pitch_deg_manuelle
+
         else:
-            (_, pitch, _) = capteur_imu.get_orientation()
+            if not capteur_imu.donnees_valides():
+                erreur = capteur_imu.get_derniere_erreur()
+
+                print(
+                    "Orientation BNO085 indisponible : "
+                    f"{erreur}"
+                )
+
+                # Ne pas ajouter l'ancienne orientation au filtre.
+                return
+
+            _, pitch, _ = capteur_imu.get_orientation()
             pitch_brut = pitch - self.pitch_offset_deg
-        self.pitch_deg = self._moyenne_mobile_pitch.ajouter(pitch_brut)
+
+        self.pitch_deg = (
+            self._moyenne_mobile_pitch.ajouter(
+                pitch_brut
+            )
+        )    
     
-    def update_acceleration_lin(self, dt):
-        if self.debug_mode:
-            self.acceleration_lin = self.acceleration_lin_manuelle
-            return
-
-        if not self.is_running:
-            self.acceleration_lin = 0.0
-            return
-
-        (x, y, z), valide = capteur_imu.get_acceleration_lineaire()
-
-        if not valide:
-            self.acceleration_lin = 0.0
-            return
-
-        acceleration_filtree = self._moyenne_mobile_acceleration.ajouter(x)
-        self.acceleration_lin = puissance_estimee.filtrer_acceleration(acceleration_filtree)
-
     def update_duree(self, dt):
         if self.is_running:
             self.duree_session += dt
@@ -233,6 +280,13 @@ class Dashboard(BoxLayout):
     def update_puissance(self, dt):
         if not (self.is_running or self.debug_mode):
             return
+
+        if (
+            not self.debug_mode
+            and not capteur_imu.donnees_valides()
+        ):
+            return
+
 
         # --------------------------------------------------------------
         # 1. Préparation des mesures
@@ -340,7 +394,6 @@ class Dashboard(BoxLayout):
         self._elevation_totale_m = 0.0
         self._moyenne_mobile_puissance.reinitialiser()
         self._moyenne_mobile_pitch.reinitialiser()
-        self._moyenne_mobile_acceleration.reinitialiser()
         self.duree_session = 0.0
         self.duree_str = "00:00"
         capteur_vitesse.reset_odometre()
@@ -405,6 +458,7 @@ class PowerApp(App):
 
     def on_stop(self):
         capteur_vitesse.cleanup()
+        capteur_imu.cleanup()
 
 if __name__ == "__main__":
     PowerApp().run()

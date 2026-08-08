@@ -2,43 +2,55 @@ import math
 import time
 import threading
 import serial
+
 from adafruit_bno08x.uart import BNO08X_UART
-from adafruit_bno08x import (
-    BNO_REPORT_ACCELEROMETER,
-    BNO_REPORT_GYROSCOPE,
-    BNO_REPORT_MAGNETOMETER,
-    BNO_REPORT_ROTATION_VECTOR,
-    BNO_REPORT_LINEAR_ACCELERATION,
-    BNO_REPORT_GRAVITY,
-    BNO_REPORT_GAME_ROTATION_VECTOR,
-    BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR,
-    BNO_REPORT_STEP_COUNTER,
-)
+from adafruit_bno08x import BNO_REPORT_GAME_ROTATION_VECTOR
 
 
 def _quat_to_euler_deg(i, j, k, real):
-    """Convertit un quaternion BNO085 (I, J, K, Real) en yaw/pitch/roll (degres)."""
-    sinr_cosp = 2 * (real * i + j * k)
-    cosr_cosp = 1 - 2 * (i * i + j * j)
+    """
+    Convertit un quaternion BNO085 (I, J, K, Real)
+    en yaw, pitch et roll, en degrés.
+    """
+    sinr_cosp = 2.0 * (real * i + j * k)
+    cosr_cosp = 1.0 - 2.0 * (i * i + j * j)
     roll = math.atan2(sinr_cosp, cosr_cosp)
 
-    sinp = 2 * (real * j - k * i)
-    pitch = math.copysign(math.pi / 2, sinp) if abs(sinp) >= 1 else math.asin(sinp)
+    sinp = 2.0 * (real * j - k * i)
 
-    siny_cosp = 2 * (real * k + i * j)
-    cosy_cosp = 1 - 2 * (j * j + k * k)
+    if abs(sinp) >= 1.0:
+        pitch = math.copysign(math.pi / 2.0, sinp)
+    else:
+        pitch = math.asin(sinp)
+
+    siny_cosp = 2.0 * (real * k + i * j)
+    cosy_cosp = 1.0 - 2.0 * (j * j + k * k)
     yaw = math.atan2(siny_cosp, cosy_cosp)
 
-    return math.degrees(yaw), math.degrees(pitch), math.degrees(roll)
+    return (
+        math.degrees(yaw),
+        math.degrees(pitch),
+        math.degrees(roll),
+    )
 
 
 class CapteurIMU:
-    def __init__(self, port="/dev/serial0", baud=3_000_000, intervalle_lecture=0.5):
+    def __init__(
+        self,
+        port="/dev/serial0",
+        baud=3_000_000,
+        intervalle_lecture=0.5,
+    ):
         """
-        port: port serie du BNO085 ("/dev/serial0", ou "/dev/ttyAMA0" si
-              le Bluetooth occupe serial0)
-        baud: vitesse de communication UART
-        intervalle_lecture: delai entre deux lectures du capteur, en secondes
+        port:
+            Port série du BNO085.
+
+        baud:
+            Vitesse de communication UART régulière.
+
+        intervalle_lecture:
+            Délai entre deux mises à jour de l'orientation,
+            en secondes.
         """
         self.port = port
         self.baud = baud
@@ -49,159 +61,201 @@ class CapteurIMU:
 
         self._lock = threading.Lock()
         self._thread_lecture = None
+
         self._en_marche = False
         self._initialise = False
 
-        self._derniere_erreur = None
-
-        # Valeurs mises en cache (protegees par _lock)
+        # Dernière orientation valide mise en cache.
         self._yaw = 0.0
         self._pitch = 0.0
         self._roll = 0.0
-        self._game_yaw = 0.0
-        self._game_pitch = 0.0
-        self._game_roll = 0.0
-        self._accel = (0.0, 0.0, 0.0)
-        self._gyro = (0.0, 0.0, 0.0)
-        self._mag = (0.0, 0.0, 0.0)
-        self._linear = (0.0, 0.0, 0.0)
-        self._gravity = (0.0, 0.0, 0.0)
-        self._steps = 0
+
+        # Surveillance de la communication.
         self._temps_derniere_lecture = None
+        self._derniere_erreur = None
+        self._nb_erreurs_consecutives = 0
 
     # ------------------------------------------------------------------
     # Cycle de vie
     # ------------------------------------------------------------------
+
     def init(self):
-        """Ouvre le port serie, connecte le BNO085, active les capteurs
-        et demarre le thread de lecture."""
+        """
+        Ouvre le port série, initialise le BNO085, active le vecteur
+        de rotation et démarre le thread de lecture.
+        """
         if self._initialise:
             return
 
-        self._uart = serial.Serial(self.port, baudrate=self.baud, timeout=1)
+        self._uart = serial.Serial(
+            self.port,
+            baudrate=self.baud,
+            timeout=1,
+        )
+
         self._bno = BNO08X_UART(self._uart)
 
-        for feature in (
-            BNO_REPORT_ACCELEROMETER,
-            BNO_REPORT_GYROSCOPE,
-            BNO_REPORT_MAGNETOMETER,
-            BNO_REPORT_ROTATION_VECTOR,
-            BNO_REPORT_LINEAR_ACCELERATION,
-            BNO_REPORT_GRAVITY,
-            BNO_REPORT_GAME_ROTATION_VECTOR,
-            BNO_REPORT_GEOMAGNETIC_ROTATION_VECTOR,
-            BNO_REPORT_STEP_COUNTER,
-        ):
-            self._bno.enable_feature(feature)
+        # Seul rapport nécessaire pour obtenir le pitch.
+        self._bno.enable_feature(
+            BNO_REPORT_GAME_ROTATION_VECTOR
+        )
+
+        # Laisse au BNO085 le temps d'activer le rapport.
         time.sleep(0.2)
 
         self._en_marche = True
+
         self._thread_lecture = threading.Thread(
-            target=self._boucle_lecture, daemon=True
+            target=self._boucle_lecture,
+            daemon=True,
         )
         self._thread_lecture.start()
 
         self._initialise = True
 
     def cleanup(self):
-        """Arrete le thread de lecture et ferme le port serie."""
+        """Arrête le thread de lecture et ferme le port série."""
         self._en_marche = False
+
         if self._thread_lecture is not None:
-            self._thread_lecture.join(timeout=self.intervalle_lecture + 1.0)
+            self._thread_lecture.join(
+                timeout=self.intervalle_lecture + 1.0
+            )
+            self._thread_lecture = None
+
         if self._uart is not None:
             self._uart.close()
+            self._uart = None
+
+        self._bno = None
         self._initialise = False
 
     # ------------------------------------------------------------------
-    # Lecture des valeurs (thread-safe)
+    # Lecture des valeurs
     # ------------------------------------------------------------------
+
     def get_orientation(self):
-        """Retourne (yaw, pitch, roll) en degres, orientation fusionnee
-        (utilise le magnetometre, plus precise mais plus sensible aux
-        perturbations magnetiques)."""
+        """
+        Retourne (yaw, pitch, roll) en degrés.
+
+        L'orientation provient du GAME_ROTATION_VECTOR. Celui-ci
+        n'utilise pas le magnétomètre. Le yaw peut donc dériver avec
+        le temps, mais le pitch demeure adapté à la mesure de pente.
+        """
         with self._lock:
             return self._yaw, self._pitch, self._roll
 
-    def get_orientation_jeu(self):
-        """Retourne (yaw, pitch, roll) en degres, orientation "game"
-        (n'utilise pas le magnetometre, plus stable mais le yaw derive
-        lentement dans le temps)."""
-        with self._lock:
-            return self._game_yaw, self._game_pitch, self._game_roll
+    def donnees_valides(self, age_max_s=1.5):
+        """
+        Retourne True si une orientation valide a été reçue récemment.
 
-    def get_acceleration(self):
-        """Retourne (x, y, z) en m/s^2, acceleration brute (inclut la gravite)."""
-        with self._lock:
-            return self._accel
-
-    def get_gyro(self):
-        """Retourne (x, y, z) en rad/s, vitesse angulaire."""
-        with self._lock:
-            return self._gyro
-
-    def get_magnetique(self):
-        """Retourne (x, y, z) en µT, champ magnetique."""
-        with self._lock:
-            return self._mag
-
-    def get_acceleration_lineaire(self):
+        Avec une lecture toutes les 0,5 seconde, une limite de
+        1,5 seconde tolère quelques lectures manquées avant de
+        déclarer les données invalides.
+        """
         with self._lock:
             if self._temps_derniere_lecture is None:
-                return (0.0, 0.0, 0.0), False
+                return False
 
-            age = time.monotonic() - self._temps_derniere_lecture
-            valide = age < 1.5
+            age_s = (
+                time.monotonic()
+                - self._temps_derniere_lecture
+            )
 
-            return self._linear, valide
+            return age_s <= age_max_s
 
-    def get_gravite(self):
-        """Retourne (x, y, z) en m/s^2, vecteur de gravite seul."""
+    def get_age_derniere_lecture(self):
+        """
+        Retourne l'âge de la dernière orientation valide en secondes.
+
+        Retourne None si aucune lecture valide n'a encore été reçue.
+        """
         with self._lock:
-            return self._gravity
+            if self._temps_derniere_lecture is None:
+                return None
 
-    def get_pas(self):
-        """Retourne le nombre de pas compte par le capteur."""
-        with self._lock:
-            return self._steps
+            return (
+                time.monotonic()
+                - self._temps_derniere_lecture
+            )
 
     def get_derniere_erreur(self):
-        """Retourne le dernier message d'erreur de lecture (ou None)."""
+        """Retourne le dernier message d'erreur, ou None."""
         with self._lock:
             return self._derniere_erreur
+
+    def get_nb_erreurs_consecutives(self):
+        """Retourne le nombre d'erreurs de lecture consécutives."""
+        with self._lock:
+            return self._nb_erreurs_consecutives
 
     # ------------------------------------------------------------------
     # Thread de lecture
     # ------------------------------------------------------------------
+
     def _boucle_lecture(self):
         while self._en_marche:
             try:
-                accel = self._bno.acceleration
-                gyro = self._bno.gyro
-                mag = self._bno.magnetic
-                quat = self._bno.quaternion
                 game_quat = self._bno.game_quaternion
-                linear = self._bno.linear_acceleration
-                gravity = self._bno.gravity
-                steps = self._bno.steps
 
-                yaw, pitch, roll = _quat_to_euler_deg(*quat)
-                game_yaw, game_pitch, game_roll = _quat_to_euler_deg(*game_quat)
+                if game_quat is None:
+                    raise RuntimeError(
+                        "Aucun quaternion reçu du BNO085"
+                    )
+
+                if len(game_quat) != 4:
+                    raise RuntimeError(
+                        "Quaternion BNO085 incomplet"
+                    )
+
+                if any(
+                    valeur is None
+                    or not math.isfinite(valeur)
+                    for valeur in game_quat
+                ):
+                    raise RuntimeError(
+                        "Quaternion BNO085 invalide"
+                    )
+
+                yaw, pitch, roll = _quat_to_euler_deg(
+                    *game_quat
+                )
+
+                if not all(
+                    math.isfinite(valeur)
+                    for valeur in (yaw, pitch, roll)
+                ):
+                    raise RuntimeError(
+                        "Orientation BNO085 invalide"
+                    )
 
                 with self._lock:
-                    self._accel = accel
-                    self._gyro = gyro
-                    self._mag = mag
-                    self._linear = linear
-                    self._gravity = gravity
-                    self._steps = steps
-                    self._yaw, self._pitch, self._roll = yaw, pitch, roll
-                    self._game_yaw = game_yaw
-                    self._game_pitch = game_pitch
-                    self._game_roll = game_roll
+                    self._yaw = yaw
+                    self._pitch = pitch
+                    self._roll = roll
+
+                    self._temps_derniere_lecture = (
+                        time.monotonic()
+                    )
+
                     self._derniere_erreur = None
+                    self._nb_erreurs_consecutives = 0
 
-            except Exception as e:
+            except Exception as erreur:
+                message = (
+                    f"{type(erreur).__name__}: {erreur}"
+                )
+
                 with self._lock:
-                    self._derniere_erreur = str(e)
+                    self._derniere_erreur = message
+                    self._nb_erreurs_consecutives += 1
+                    nombre_erreurs = (
+                        self._nb_erreurs_consecutives
+                    )
+
+                print(
+                    "Erreur de communication BNO085 "
+                    f"({nombre_erreurs}) : {message}"
+                )
 
             time.sleep(self.intervalle_lecture)
