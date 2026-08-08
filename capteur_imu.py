@@ -74,6 +74,7 @@ class CapteurIMU:
         self._temps_derniere_lecture = None
         self._derniere_erreur = None
         self._nb_erreurs_consecutives = 0
+        self._derniere_erreur_observee = None
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -248,6 +249,7 @@ class CapteurIMU:
 
                 with self._lock:
                     self._derniere_erreur = message
+                    self._derniere_erreur_observee = message
                     self._nb_erreurs_consecutives += 1
                     nombre_erreurs = (
                         self._nb_erreurs_consecutives
@@ -259,3 +261,6 @@ class CapteurIMU:
                 )
 
             time.sleep(self.intervalle_lecture)
+    def get_derniere_erreur_observee(self):
+        with self._lock:
+            return self._derniere_erreur_observee

@@ -26,7 +26,7 @@ MAX_POWER = 400      # echelle max de la jauge (W)
 
 capteur_vitesse = CapteurVitesse(pin=4, taille_moyenne_mobile=4) # taille_moyenne_mobile ajustée pour avoir une courbe plus lisse mais avec moins de latence
 capteur_vitesse.init() 
-capteur_imu = CapteurIMU(intervalle_lecture=0.1) # intervalle_lecture ajusté pour avoir une courbe plus lisse mais avec moins de latence
+capteur_imu = CapteurIMU(intervalle_lecture=0.2) # intervalle_lecture ajusté pour avoir une courbe plus lisse mais avec moins de latence
 capteur_imu.init()
 class PowerGauge(Widget):
     # NumericProperty permet au fichier .kv de "observer" cette valeur
@@ -177,6 +177,9 @@ class Dashboard(BoxLayout):
         # Historique utilisé pour calculer l'accélération à partir de la vitesse Hall.
         self._historique_vitesse_acceleration = deque(maxlen=11)
 
+        self._derniere_acceleration_hall = 0.0
+        self._temps_dernier_avertissement_imu = 0.0
+
         Clock.schedule_interval(self.update_distance, 0.5)
         Clock.schedule_interval(self.update_vitesse, 0.2)
         Clock.schedule_interval(self.update_duree, 0.5)
@@ -185,7 +188,7 @@ class Dashboard(BoxLayout):
         Clock.schedule_interval(self.update_puissance, 0.2)
         Clock.schedule_interval(self.update_target_power, 0.5)
 
-        self._derniere_acceleration_hall = 0.0
+        
 
 
 
@@ -240,6 +243,7 @@ class Dashboard(BoxLayout):
                 self.vitesse = capteur_vitesse.get_vitesse()
             else:
                 self.vitesse = 0
+                
     def update_orientation(self, dt):
         if not self.is_running and not self.debug_mode:
             self.pitch_deg = 0.0
@@ -250,24 +254,34 @@ class Dashboard(BoxLayout):
 
         else:
             if not capteur_imu.donnees_valides():
-                erreur = capteur_imu.get_derniere_erreur()
+                maintenant = time.monotonic()
 
-                print(
-                    "Orientation BNO085 indisponible : "
-                    f"{erreur}"
-                )
+                if (maintenant
+                    - self._temps_dernier_avertissement_imu
+                    >= 2.0
+                ):
+                    erreur = capteur_imu.get_derniere_erreur()
+                    age = capteur_imu.get_age_derniere_lecture()
 
-                # Ne pas ajouter l'ancienne orientation au filtre.
+                    if age is None:
+                        age_texte = "aucune lecture reçue"
+                    else:
+                        age_texte = f"{age:.2f} s"
+
+                    print(
+                        "Orientation BNO085 indisponible : "
+                        f"âge={age_texte}, "
+                        f"erreur={erreur}")
+
+                    self._temps_dernier_avertissement_imu = (maintenant)
+
+                # Ne pas utiliser l'ancienne orientation.
                 return
 
             _, pitch, _ = capteur_imu.get_orientation()
             pitch_brut = pitch - self.pitch_offset_deg
 
-        self.pitch_deg = (
-            self._moyenne_mobile_pitch.ajouter(
-                pitch_brut
-            )
-        )    
+        self.pitch_deg = (self._moyenne_mobile_pitch.ajouter(pitch_brut))
     
     def update_duree(self, dt):
         if self.is_running:
